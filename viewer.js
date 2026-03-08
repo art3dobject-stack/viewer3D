@@ -10,31 +10,52 @@ function init() {
 
     scene = new THREE.Scene();
 
-    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        2000
+    );
     camera.position.set(2, 2, 3);
 
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setClearColor(0xaaaaaa);
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
 
-    // Lumière premium
-    const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-    scene.add(light);
+    const hemiLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 1.2);
+    scene.add(hemiLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-    dirLight.position.set(5, 10, 7);
+    dirLight.position.set(5, 10, 7.5);
     scene.add(dirLight);
 
-    // UI
-    document.getElementById("fileInput").addEventListener("change", loadModel);
-    document.getElementById("colorPicker").addEventListener("input", updateColor);
-    document.getElementById("resetBtn").addEventListener("click", resetCamera);
-    document.getElementById("autoBtn").addEventListener("click", () => autoRotate = !autoRotate);
+    const fileInput = document.getElementById("fileInput");
+    const colorPicker = document.getElementById("colorPicker");
+    const resetBtn = document.getElementById("resetBtn");
+    const autoBtn = document.getElementById("autoBtn");
+
+    if (fileInput) {
+        fileInput.addEventListener("change", loadModel);
+    }
+    if (colorPicker) {
+        colorPicker.addEventListener("input", updateColor);
+    }
+    if (resetBtn) {
+        resetBtn.addEventListener("click", resetCamera);
+    }
+    if (autoBtn) {
+        autoBtn.addEventListener("click", () => {
+            autoRotate = !autoRotate;
+        });
+    }
 
     window.addEventListener("resize", onResize);
+    resetCamera();
 }
 
 function loadModel(event) {
@@ -42,7 +63,6 @@ function loadModel(event) {
     if (!file) return;
 
     const ext = file.name.split(".").pop().toLowerCase();
-
     if (currentMesh) {
         scene.remove(currentMesh);
         currentMesh = null;
@@ -50,37 +70,39 @@ function loadModel(event) {
 
     if (ext === "stl") {
         const loader = new THREE.STLLoader();
-        loader.load(URL.createObjectURL(file), geometry => {
+        const reader = new FileReader();
+
+        reader.onload = function (e) {
+            const geometry = loader.parse(e.target.result);
+            geometry.computeBoundingBox();
+            geometry.center();
+
             const material = new THREE.MeshStandardMaterial({
-                color: document.getElementById("colorPicker").value,
-                metalness: 0.2,
-                roughness: 0.6
+                color: document.getElementById("colorPicker").value || "#cccccc",
+                roughness: 0.6,
+                metalness: 0.1
             });
 
             const mesh = new THREE.Mesh(geometry, material);
-            mesh.geometry.center();
-            mesh.scale.set(1, 1, 1);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
 
             currentMesh = mesh;
             scene.add(mesh);
-        });
-    }
 
-    if (ext === "glb" || ext === "gltf") {
-        const loader = new THREE.GLTFLoader();
-        loader.load(URL.createObjectURL(file), gltf => {
-            currentMesh = gltf.scene;
-            scene.add(gltf.scene);
-        });
+            fitCameraToObject(mesh);
+        };
+
+        reader.readAsArrayBuffer(file);
+    } else {
+        alert("Format non supporté. Utilise un fichier .stl");
     }
 }
 
 function updateColor(event) {
     if (!currentMesh) return;
-
     const color = event.target.value;
-
-    currentMesh.traverse(child => {
+    currentMesh.traverse((child) => {
         if (child.isMesh && child.material) {
             child.material.color.set(color);
         }
@@ -90,6 +112,24 @@ function updateColor(event) {
 function resetCamera() {
     camera.position.set(2, 2, 3);
     controls.target.set(0, 0, 0);
+    controls.update();
+}
+
+function fitCameraToObject(object) {
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * (Math.PI / 180);
+    let cameraZ = Math.abs(maxDim / Math.sin(fov / 2));
+
+    cameraZ *= 1.2;
+
+    camera.position.set(center.x + cameraZ / 3, center.y + cameraZ / 3, center.z + cameraZ);
+    camera.lookAt(center);
+    controls.target.copy(center);
+    controls.update();
 }
 
 function onResize() {
